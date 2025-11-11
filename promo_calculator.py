@@ -151,12 +151,12 @@ def prepare_file_a(df_a_raw: pd.DataFrame, config: Config) -> Tuple[pd.DataFrame
     )
     df["MOQ"] = to_numeric(df[config.COL_A_MOQ], config.COL_A_MOQ, warnings)
 
-    # Supply source: normalize to integer, robust to NaN/非數字，避免 "cannot convert float NaN to integer"
-    df["Supply_source"] = (
-        pd.to_numeric(df[config.COL_A_SUPPLY_SOURCE], errors="coerce")
-        .fillna(0)
-        .astype(int)
-    )
+    # Supply source: normalize robustly; keep as numeric (float) to avoid NaN→int issues during apply()
+    supply_raw = pd.to_numeric(df[config.COL_A_SUPPLY_SOURCE], errors="coerce")
+    supply_raw = supply_raw.fillna(0)
+    # Negative or weird values → 0
+    supply_raw = supply_raw.clip(lower=0)
+    df["Supply_source"] = supply_raw
 
     # In Quality Insp, Blocked as optional
     if config.COL_A_IN_QLTY in df.columns:
@@ -449,7 +449,13 @@ def calculate_demand(
     def determine_dispatch_type(row) -> str:
         site = (row.get("Site") or "").upper()
         rp = (row.get("RP_Type") or "").upper()
-        supply = int(row.get("Supply_source") or 0)
+
+        # Supply_source might be float/NaN; convert safely
+        raw_supply = row.get("Supply_source", 0)
+        try:
+            supply = int(raw_supply) if pd.notna(raw_supply) else 0
+        except (TypeError, ValueError):
+            supply = 0
 
         if site == config.DC_SITE_CODE:
             return "D001"
