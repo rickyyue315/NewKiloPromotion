@@ -316,7 +316,7 @@ def merge_data(
     df_b1: pd.DataFrame,
     df_b2: pd.DataFrame,
     config: Config,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, List[str]]:
     """
     Merge A with promotion definitions and site target percentages to form a unified working dataset.
 
@@ -326,7 +326,43 @@ def merge_data(
     - Group_No, SKU_Target, Target_Type, Promo_Target_Cover_Days
     - Site_Target_%
     - Is_Promo_SKU
+    
+    Returns: (merged_df, warnings)
     """
+    warnings: List[str] = []
+    
+    # Track File A SKUs
+    articles_in_a = set(df_a["Article"].unique())
+    articles_in_b1 = set(df_b1["Article"].unique())
+    
+    # Diagnostic: Check for Article overlap
+    matched_articles = articles_in_a.intersection(articles_in_b1)
+    unmatched_in_a = articles_in_a - articles_in_b1
+    unmatched_in_b1 = articles_in_b1 - articles_in_a
+    
+    if not matched_articles:
+        warnings.append(
+            f"⚠️ CRITICAL: NO Articles from File A matched with File B Sheet1! "
+            f"File A has {len(articles_in_a)} unique Articles, "
+            f"File B Sheet1 has {len(articles_in_b1)} unique Articles. "
+            f"This means NO promotion targets will be applied."
+        )
+    else:
+        warnings.append(
+            f"✓ Article match summary: {len(matched_articles)} matched, "
+            f"{len(unmatched_in_a)} in File A only, "
+            f"{len(unmatched_in_b1)} in File B only."
+        )
+    
+    if unmatched_in_a:
+        warnings.append(
+            f"Articles in File A but not in File B (no promo targets): {sorted(list(unmatched_in_a))[:10]}"
+        )
+    if unmatched_in_b1:
+        warnings.append(
+            f"Articles in File B but not in File A (unused promo targets): {sorted(list(unmatched_in_b1))}"
+        )
+    
     # Merge promo SKU info by Article (many sites share SKU)
     df = df_a.merge(
         df_b1[
@@ -365,8 +401,15 @@ def merge_data(
 
     # Determine promo flag: must have SKU_Target > 0 and Site_Target_% > 0
     df["Is_Promo_SKU"] = (df["SKU_Target"].fillna(0) > 0) & (df["Site_Target_%"].fillna(0) > 0)
+    
+    # Diagnostic: Count promo SKUs
+    promo_count = df["Is_Promo_SKU"].sum()
+    total_rows = len(df)
+    warnings.append(
+        f"Promo SKU detection: {promo_count} out of {total_rows} rows flagged as promotion SKUs"
+    )
 
-    return df
+    return df, warnings
 
 
 def calculate_demand(
@@ -629,18 +672,19 @@ def main(
     df_a_clean, warn_a = prepare_file_a(df_a_raw, cfg)
     df_b1, df_b2, warn_b = prepare_file_b(df_b1_raw, df_b2_raw, cfg)
 
-    merged = merge_data(df_a_clean, df_b1, df_b2, cfg)
+    merged, warn_merge = merge_data(df_a_clean, df_b1, df_b2, cfg)
     detail = calculate_demand(merged, cfg, lead_time=lead_time)
     summary = generate_summary(detail, cfg)
 
     export_to_excel(detail, summary, df_a_clean, df_b1, df_b2, output_path)
 
     # Print warnings to stdout for user visibility
-    all_warnings = warn_a + warn_b
+    all_warnings = warn_a + warn_b + warn_merge
     if all_warnings:
-        print("Warnings:")
+        print("\n=== WARNINGS ===")
         for w in all_warnings:
             print(f"- {w}")
+        print("================\n")
     print(f"Calculation completed. Output written to: {output_path}")
 
 

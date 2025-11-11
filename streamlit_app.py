@@ -92,7 +92,7 @@ def run_app():
                 df_a_clean, warn_a = prepare_file_a(df_a_raw, cfg)
                 df_b1, df_b2, warn_b = prepare_file_b(df_b1_raw, df_b2_raw, cfg)
 
-                merged = merge_data(df_a_clean, df_b1, df_b2, cfg)
+                merged, warn_merge = merge_data(df_a_clean, df_b1, df_b2, cfg)
 
             with st.spinner("Calculating demand and suggested dispatch..."):
                 detail = calculate_demand(merged, cfg, lead_time=lead_time)
@@ -100,10 +100,19 @@ def run_app():
             with st.spinner("Generating summary report..."):
                 summary = generate_summary(detail, cfg)
 
-            # Display warnings
-            all_warnings = warn_a + warn_b
+            # Display warnings - merge warnings shown prominently if critical
+            all_warnings = warn_a + warn_b + warn_merge
+            
+            # Check for critical Article mismatch
+            critical_warnings = [w for w in warn_merge if "CRITICAL" in w or "NO Articles" in w]
+            if critical_warnings:
+                st.error("🚨 Critical Data Issue Detected:")
+                for w in critical_warnings:
+                    st.error(w)
+                st.warning("⚠️ The calculation will proceed, but promotion targets may not be applied correctly. Please verify your input files.")
+            
             if all_warnings:
-                with st.expander("Data Quality Warnings", expanded=False):
+                with st.expander("Data Quality Warnings", expanded=True if critical_warnings else False):
                     for w in all_warnings:
                         st.warning(w)
 
