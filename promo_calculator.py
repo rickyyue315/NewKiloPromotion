@@ -614,19 +614,87 @@ def export_to_excel(
     output_path: Path,
 ):
     """
-    Export:
-    - Raw_A_Clean
-    - Promo_Sheet1
-    - Promo_Sheet2
-    - Detail_Calculation
-    - Summary_Report
+    Export simplified views (remove intermediate/duplicated columns):
+
+    - Raw_A_Clean:
+        Keep as-is (for audit / power users).
+
+    - Promo_Sheet1 / Promo_Sheet2:
+        Keep as-is (reference configuration).
+
+    - Detail_Calculation (SIMPLIFIED):
+        Only final decision-useful fields:
+        [
+            "Group_No",
+            "Article",
+            "Site",
+            "RP_Type",
+            "SaSa_Net_Stock",
+            "Pending_Received",
+            "Safety_Stock",
+            "SKU_Target",
+            "Site_Target_%",
+            "Is_Promo_SKU",
+            "Total_Demand",
+            "Suggested_Dispatch_Qty",
+            "Dispatch_Type",
+        ]
+        (Columns missing in data will be skipped safely.)
+
+    - Summary_Report (SIMPLIFIED):
+        Only aggregated decision fields:
+        [
+            "Group_No",
+            "Article",
+            "Total_Demand",
+            "Total_Stock_Available",
+            "Total_Dispatch",
+            "D001_SaSa_Net_Stock",
+            "Out_of_Stock_Warning",
+        ]
+        (Columns missing in data will be skipped safely.)
     """
+    # Define keep-lists for simplified outputs
+    detail_keep_cols = [
+        "Group_No",
+        "Article",
+        "Site",
+        "RP_Type",
+        "SaSa_Net_Stock",
+        "Pending_Received",
+        "Safety_Stock",
+        "SKU_Target",
+        "Site_Target_%",
+        "Is_Promo_SKU",
+        "Total_Demand",
+        "Suggested_Dispatch_Qty",
+        "Dispatch_Type",
+    ]
+    # Keep only existing columns, avoid KeyError
+    detail_simple_cols = [c for c in detail_keep_cols if c in detail.columns]
+    detail_simple = detail[detail_simple_cols].copy()
+
+    summary_keep_cols = [
+        "Group_No",
+        "Article",
+        "Total_Demand",
+        "Total_Stock_Available",
+        "Total_Dispatch",
+        "D001_SaSa_Net_Stock",
+        "Out_of_Stock_Warning",
+    ]
+    summary_simple_cols = [c for c in summary_keep_cols if c in summary.columns]
+    summary_simple = summary[summary_simple_cols].copy()
+
     with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
+        # Raw / config sheets unchanged for traceability
         df_a_clean.to_excel(writer, sheet_name="Raw_A_Clean", index=False)
         df_b1.to_excel(writer, sheet_name="Promo_Sheet1", index=False)
         df_b2.to_excel(writer, sheet_name="Promo_Sheet2", index=False)
-        detail.to_excel(writer, sheet_name="Detail_Calculation", index=False)
-        summary.to_excel(writer, sheet_name="Summary_Report", index=False)
+
+        # Simplified views for business users
+        detail_simple.to_excel(writer, sheet_name="Detail_Calculation", index=False)
+        summary_simple.to_excel(writer, sheet_name="Summary_Report", index=False)
 
 
 def main(
