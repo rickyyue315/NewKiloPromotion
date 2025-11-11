@@ -189,7 +189,8 @@ def run_app():
                         aggfunc="sum",
                         fill_value=0,
                     )
-                    st.dataframe(pivot.style.background_gradient(cmap="Reds"))
+                    # Use plain table to avoid matplotlib dependency on Streamlit Cloud
+                    st.dataframe(pivot)
                 else:
                     st.info("No non-D001 data available for heatmap.")
 
