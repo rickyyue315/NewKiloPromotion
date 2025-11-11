@@ -347,12 +347,14 @@ def merge_data(
 
     # Determine Site_Target_% based on Target_Type
     def pick_site_target_pct(row) -> float:
-        t = (row.get("Target_Type") or "").upper()
+        # Robust against non-string / NaN values
+        raw_type = row.get("Target_Type")
+        t = str(raw_type).upper() if raw_type is not None else ""
         if t == "HK":
             return float(row.get("Pct_HK") or 0)
         if t == "MO":
             return float(row.get("Pct_MO") or 0)
-        # Default / ALL
+        # Default / ALL / unexpected values
         return float(row.get("Pct_ALL") or 0)
 
     df["Site_Target_%"] = df.apply(pick_site_target_pct, axis=1)
