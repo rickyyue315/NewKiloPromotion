@@ -154,32 +154,25 @@ def run_app():
                 # Exclude DC site for this chart
                 detail_non_dc = detail[detail["Site"] != cfg.DC_SITE_CODE].copy()
                 if not detail_non_dc.empty:
-                    # Aggregate by Article
+                    # Aggregate by Article: only compute Total_Demand here
                     chart_df = (
                         detail_non_dc.groupby("Article", as_index=False)
-                        .agg(
-                            Total_Demand=("Total_Demand", "sum"),
-                            Total_Stock_Available=(
-                                lambda x: 0
-                            ),  # placeholder, will recompute below
-                        )
+                        .agg(Total_Demand=("Total_Demand", "sum"))
                     )
 
-                    # Compute Total_Stock_Available from summary (join on Article)
-                    sum_stock = summary[["Article", "Total_Stock_Available"]].drop_duplicates()
-                    chart_df = chart_df.merge(
-                        sum_stock,
-                        on="Article",
-                        how="left",
-                        suffixes=("", "_from_summary"),
-                    )
-                    # Use from summary if present
-                    chart_df["Total_Stock_Available"] = chart_df[
-                        "Total_Stock_Available_from_summary"
-                    ].fillna(chart_df["Total_Stock_Available"])
-                    chart_df = chart_df.drop(
-                        columns=["Total_Stock_Available_from_summary"], errors="ignore"
-                    )
+                    # Bring in Total_Stock_Available from summary (already aggregated by Article)
+                    if "Total_Stock_Available" in summary.columns:
+                        sum_stock = (
+                            summary[["Article", "Total_Stock_Available"]]
+                            .drop_duplicates(subset=["Article"])
+                        )
+                        chart_df = chart_df.merge(
+                            sum_stock,
+                            on="Article",
+                            how="left",
+                        )
+                    else:
+                        chart_df["Total_Stock_Available"] = 0
 
                     st.bar_chart(
                         chart_df.set_index("Article")[["Total_Demand", "Total_Stock_Available"]]
