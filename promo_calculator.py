@@ -431,17 +431,34 @@ def calculate_demand(
         if rp != config.DISPATCH_RP_TYPE:
             return 0
 
-        net = float(row.get("Net_Demand_for_Dispatch") or 0)
-        if net <= 0:
+        # Net demand: safe numeric
+        net_raw = row.get("Net_Demand_for_Dispatch", 0)
+        try:
+            net = float(net_raw)
+        except (TypeError, ValueError):
+            net = 0.0
+        if not pd.notna(net) or net <= 0:
             return 0
 
-        moq = float(row.get("MOQ") or 0)
-        if moq <= 0:
+        # MOQ: safe numeric
+        moq_raw = row.get("MOQ", 0)
+        try:
+            moq = float(moq_raw)
+        except (TypeError, ValueError):
+            moq = 0.0
+        if not pd.notna(moq) or moq <= 0:
             # no valid MOQ, follow policy: here treat as no dispatch
             return 0
 
         base_qty = max(net, moq)
-        return int(math.ceil(base_qty / moq) * moq)
+        # 保證不因 NaN 導致錯誤；ceil 結果若非有限數字則視為 0
+        try:
+            result = math.ceil(base_qty / moq) * moq
+        except Exception:
+            return 0
+        if not pd.notna(result) or result < 0:
+            return 0
+        return int(result)
 
     out["Suggested_Dispatch_Qty"] = out.apply(compute_suggested_dispatch, axis=1)
 
