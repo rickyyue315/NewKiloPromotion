@@ -151,8 +151,12 @@ def prepare_file_a(df_a_raw: pd.DataFrame, config: Config) -> Tuple[pd.DataFrame
     )
     df["MOQ"] = to_numeric(df[config.COL_A_MOQ], config.COL_A_MOQ, warnings)
 
-    # Supply source: keep as string for mapping, but we still sanitize
-    df["Supply_source"] = pd.to_numeric(df[config.COL_A_SUPPLY_SOURCE], errors="coerce").fillna(0).astype(int)
+    # Supply source: normalize to integer, robust to NaN/非數字，避免 "cannot convert float NaN to integer"
+    df["Supply_source"] = (
+        pd.to_numeric(df[config.COL_A_SUPPLY_SOURCE], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
 
     # In Quality Insp, Blocked as optional
     if config.COL_A_IN_QLTY in df.columns:
