@@ -615,11 +615,9 @@ def export_to_excel(
     """
     Export simplified views (remove intermediate/duplicated columns):
 
-    - Raw_A_Clean:
-        Keep as-is (for audit / power users).
-
-    - Raw_A_Clean_Enhanced:
+    - Final Order Report:
         Raw_A_Clean + Suggested_Dispatch_Qty, Dispatch_Type, SKU_Target, Site_Target_%, Total_Demand
+        (Values instead of formulas for better usability)
 
     - Promo_Sheet1 / Promo_Sheet2:
         Keep as-is (reference configuration).
@@ -656,7 +654,7 @@ def export_to_excel(
         ]
         (Columns missing in data will be skipped safely.)
     """
-    # Create enhanced Raw_A_Clean with additional columns
+    # Create Final Order Report with additional columns
     # First, merge df_a_clean with the calculated columns from detail
     merge_keys = ["Article", "Site"]
     
@@ -668,7 +666,7 @@ def export_to_excel(
     additional_data = additional_data.drop_duplicates(subset=merge_keys, keep='first')
     
     # Merge df_a_clean with additional columns
-    df_a_clean_enhanced = df_a_clean.merge(
+    df_final_order_report = df_a_clean.merge(
         additional_data,
         on=merge_keys,
         how="left"
@@ -707,9 +705,8 @@ def export_to_excel(
     summary_simple = summary[summary_simple_cols].copy()
 
     with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
-        # Raw / config sheets unchanged for traceability
-        df_a_clean.to_excel(writer, sheet_name="Raw_A_Clean", index=False)
-        df_a_clean_enhanced.to_excel(writer, sheet_name="Raw_A_Clean_Enhanced", index=False)
+        # Config sheets unchanged for traceability
+        df_final_order_report.to_excel(writer, sheet_name="Final Order Report", index=False)
         df_b1.to_excel(writer, sheet_name="Promo_Sheet1", index=False)
         df_b2.to_excel(writer, sheet_name="Promo_Sheet2", index=False)
 
