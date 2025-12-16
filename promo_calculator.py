@@ -550,6 +550,7 @@ def generate_summary(
     - For non-D001 sites: aggregate Total_Demand, SaSa_Net_Stock, Pending_Received, Suggested_Dispatch_Qty.
     - For D001: show DC stock metrics.
     - Out_of_Stock_Warning per SKU based on rules.
+    - Include additional article information: Article Description, Product Hierarchy, Article Long Text (60 Chars), Description p. group
     """
     # Separate D001 and non-D001
     non_dc = detail[detail["Site"] != config.DC_SITE_CODE]
@@ -558,6 +559,13 @@ def generate_summary(
     # Aggregate non-DC
     grp_keys = ["Group_No", "Article"]
 
+    # Determine which additional fields to include (if they exist)
+    additional_fields = {}
+    for field in ["Article Description", "Product Hierarchy", "Article Long Text (60 Chars)", "Description p. group"]:
+        if field in detail.columns:
+            # For additional fields, we'll take the first non-null value per group
+            additional_fields[field] = "first"
+
     agg_non_dc = (
         non_dc.groupby(grp_keys, as_index=False)
         .agg(
@@ -565,6 +573,7 @@ def generate_summary(
             Total_Stock=("SaSa_Net_Stock", "sum"),
             Total_Pending=("Pending_Received", "sum"),
             Total_Dispatch=("Suggested_Dispatch_Qty", "sum"),
+            **additional_fields
         )
     )
     agg_non_dc["Total_Stock_Available"] = agg_non_dc["Total_Stock"] + agg_non_dc["Total_Pending"]
@@ -713,6 +722,10 @@ def export_to_excel(
         "Total_Dispatch",
         "D001_SaSa_Net_Stock",
         "Out_of_Stock_Warning",
+        "Article Description",
+        "Product Hierarchy",
+        "Article Long Text (60 Chars)",
+        "Description p. group",
     ]
     summary_simple_cols = [c for c in summary_keep_cols if c in summary.columns]
     summary_simple = summary[summary_simple_cols].copy()

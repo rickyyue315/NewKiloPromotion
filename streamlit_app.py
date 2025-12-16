@@ -153,8 +153,24 @@ def run_app():
 
             with tab2:
                 st.subheader("Summary Report (Group No. + SKU)")
+                # Reorder columns to put new fields after Article
+                column_order = ["Group_No", "Article"]
+                
+                # Add new fields if they exist in the dataframe
+                for field in ["Article Description", "Product Hierarchy", "Article Long Text (60 Chars)", "Description p. group"]:
+                    if field in summary.columns:
+                        column_order.append(field)
+                
+                # Add the rest of the original columns
+                original_cols = ["Total_Demand", "Total_Stock_Available", "Total_Stock",
+                               "Total_Pending", "Total_Dispatch", "D001_SaSa_Net_Stock", "Out_of_Stock_Warning"]
+                for col in original_cols:
+                    if col in summary.columns:
+                        column_order.append(col)
+                
+                # Display with reordered columns
                 st.dataframe(
-                    summary,
+                    summary[column_order],
                     use_container_width=True,
                 )
 
