@@ -448,11 +448,10 @@ def calculate_demand(
     # Total_Demand
     out["Total_Demand"] = out["Base_Demand"] + out["Site_Promo_Demand"]
 
-    # Net_Demand_raw
+    # Net_Demand_raw (without Safety Stock)
     out["Net_Demand_raw"] = (
         out["Total_Demand"]
         - (out["SaSa_Net_Stock"] + out["Pending_Received"])
-        + out["Safety_Stock"]
     )
 
     # Net_Demand_for_Dispatch
