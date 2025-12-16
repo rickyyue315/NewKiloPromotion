@@ -619,6 +619,9 @@ def export_to_excel(
     - Raw_A_Clean:
         Keep as-is (for audit / power users).
 
+    - Raw_A_Clean_Enhanced:
+        Raw_A_Clean + Suggested_Dispatch_Qty, Dispatch_Type, SKU_Target, Site_Target_%, Total_Demand
+
     - Promo_Sheet1 / Promo_Sheet2:
         Keep as-is (reference configuration).
 
@@ -654,6 +657,24 @@ def export_to_excel(
         ]
         (Columns missing in data will be skipped safely.)
     """
+    # Create enhanced Raw_A_Clean with additional columns
+    # First, merge df_a_clean with the calculated columns from detail
+    merge_keys = ["Article", "Site"]
+    
+    # Get the additional columns from detail
+    additional_cols = ["Suggested_Dispatch_Qty", "Dispatch_Type", "SKU_Target", "Site_Target_%", "Total_Demand"]
+    additional_data = detail[merge_keys + additional_cols].copy()
+    
+    # Remove duplicates in additional_data to ensure clean merge
+    additional_data = additional_data.drop_duplicates(subset=merge_keys, keep='first')
+    
+    # Merge df_a_clean with additional columns
+    df_a_clean_enhanced = df_a_clean.merge(
+        additional_data,
+        on=merge_keys,
+        how="left"
+    )
+    
     # Define keep-lists for simplified outputs
     detail_keep_cols = [
         "Group_No",
@@ -689,6 +710,7 @@ def export_to_excel(
     with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
         # Raw / config sheets unchanged for traceability
         df_a_clean.to_excel(writer, sheet_name="Raw_A_Clean", index=False)
+        df_a_clean_enhanced.to_excel(writer, sheet_name="Raw_A_Clean_Enhanced", index=False)
         df_b1.to_excel(writer, sheet_name="Promo_Sheet1", index=False)
         df_b2.to_excel(writer, sheet_name="Promo_Sheet2", index=False)
 
