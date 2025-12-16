@@ -560,22 +560,40 @@ def generate_summary(
     grp_keys = ["Group_No", "Article"]
 
     # Determine which additional fields to include (if they exist)
-    additional_fields = {}
+    additional_fields: list[str] = []
     for field in ["Article Description", "Product Hierarchy", "Article Long Text (60 Chars)", "Description p. group"]:
         if field in detail.columns:
             # For additional fields, we'll take the first non-null value per group
-            additional_fields[field] = "first"
+            additional_fields.append(field)
+
+    # Build aggregation dictionary with correct column names
+    agg_dict = {
+        "Total_Demand": "sum",
+        "SaSa_Net_Stock": "sum",
+        "Pending_Received": "sum",
+        "Suggested_Dispatch_Qty": "sum",
+    }
+    
+    # Add additional fields to aggregation dictionary
+    for field in additional_fields:
+        agg_dict[field] = "first"
 
     agg_non_dc = (
         non_dc.groupby(grp_keys, as_index=False)
-        .agg(
-            Total_Demand=("Total_Demand", "sum"),
-            Total_Stock=("SaSa_Net_Stock", "sum"),
-            Total_Pending=("Pending_Received", "sum"),
-            Total_Dispatch=("Suggested_Dispatch_Qty", "sum"),
-            **additional_fields
-        )
+        .agg(agg_dict)
     )
+    
+    # Rename columns to match expected output format
+    agg_non_dc.columns = [
+        "Group_No" if col == "Group_No" else
+        "Article" if col == "Article" else
+        "Total_Demand" if col == "Total_Demand" else
+        "Total_Stock" if col == "SaSa_Net_Stock" else
+        "Total_Pending" if col == "Pending_Received" else
+        "Total_Dispatch" if col == "Suggested_Dispatch_Qty" else
+        col  # Keep additional fields as-is
+        for col in agg_non_dc.columns
+    ]
     agg_non_dc["Total_Stock_Available"] = agg_non_dc["Total_Stock"] + agg_non_dc["Total_Pending"]
 
     # D001 info: assume at most one row per (Article) for DC; if multiple, sum
