@@ -78,20 +78,17 @@ def read_input_files(
     Returns:
     (df_a, df_b1, df_b2)
     """
-    # File A - 先嘗試讀取 "Data"，如果失敗則嘗試 "Sheet1"
+    # File A - 直接讀取 "Sheet1" 工作表
     try:
-        df_a = pd.read_excel(file_a_path, sheet_name="Data", dtype=str)
+        df_a = pd.read_excel(file_a_path, sheet_name="Sheet1", dtype=str)
     except ValueError:
-        try:
-            df_a = pd.read_excel(file_a_path, sheet_name="Sheet1", dtype=str)
-        except ValueError:
-            # 如果兩者都失敗，列出所有可用的工作表名稱
-            xls_a = pd.ExcelFile(file_a_path)
-            available_sheets = xls_a.sheet_names
-            raise ValueError(
-                f"File A missing required sheet. Tried 'Data' and 'Sheet1'. "
-                f"Available sheets: {available_sheets}"
-            )
+        # 如果失敗，列出所有可用的工作表名稱
+        xls_a = pd.ExcelFile(file_a_path)
+        available_sheets = xls_a.sheet_names
+        raise ValueError(
+            f"File A missing required sheet 'Sheet1'. "
+            f"Available sheets: {available_sheets}"
+        )
 
     # File B
     xls_b = pd.ExcelFile(file_b_path)
