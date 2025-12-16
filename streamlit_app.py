@@ -42,7 +42,7 @@ def run_app():
         st.markdown(
             """
             - File A: Inventory & Sales
-              - Sheet: Data
+              - Sheet: Sheet1
               - Required columns:
                 - Article, Site, RP Type, SaSa Net Stock, Pending Received,
                   Safety Stock, Last Month Sold Qty, MOQ, Supply source
@@ -83,7 +83,7 @@ def run_app():
         try:
             with st.spinner("Reading and validating input files..."):
                 # Use in-memory bytes with pandas
-                df_a_raw = pd.read_excel(file_a, sheet_name="Data", dtype=str)
+                df_a_raw = pd.read_excel(file_a, sheet_name="Sheet1", dtype=str)
 
                 xls_b = pd.ExcelFile(file_b)
                 df_b1_raw = pd.read_excel(xls_b, sheet_name="Sheet 1", dtype=str)
