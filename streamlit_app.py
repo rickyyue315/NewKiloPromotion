@@ -53,6 +53,7 @@ def run_app():
               - Site codes will be upper-cased.
               - Percent columns can be 0–1 or 0–100%.
               - Abnormal Last Month Sold Qty > 100,000 will be capped.
+              - H-sites are defined as HA*, HB*, HC*, HD* (sites starting with H followed by A, B, C, or D)
             """
         )
 
@@ -83,10 +84,18 @@ def run_app():
         try:
             with st.spinner("Reading and validating input files..."):
                 # Use in-memory bytes with pandas
+                # Read all columns as string, then ensure Article column is TEXT format
                 df_a_raw = pd.read_excel(file_a, sheet_name="Sheet1", dtype=str)
+                # Ensure Article column is treated as TEXT (string) format
+                if "Article" in df_a_raw.columns:
+                    df_a_raw["Article"] = df_a_raw["Article"].astype(str)
 
                 xls_b = pd.ExcelFile(file_b)
                 df_b1_raw = pd.read_excel(xls_b, sheet_name="Sheet 1", dtype=str)
+                # Ensure Article column is treated as TEXT (string) format in File B Sheet 1
+                if "Article" in df_b1_raw.columns:
+                    df_b1_raw["Article"] = df_b1_raw["Article"].astype(str)
+                
                 df_b2_raw = pd.read_excel(xls_b, sheet_name="Sheet 2", dtype=str)
 
                 df_a_clean, warn_a = prepare_file_a(df_a_raw, cfg)
@@ -144,11 +153,14 @@ def run_app():
                             "Net_Demand_raw",
                             "Net_Demand_for_Dispatch",
                             "MOQ",
+                            "Promotion_Days",
                             "Suggested_Dispatch_Qty",
+                            "Suggested_DN_Qty",
                             "Dispatch_Type",
+                            "Dispatch_Remark",
                         ]
                     ],
-                    use_container_width=True,
+                    width='stretch',
                 )
 
             with tab2:
@@ -156,23 +168,48 @@ def run_app():
                 # Reorder columns to put new fields after Article
                 column_order = ["Group_No", "Article"]
                 
-                # Add new fields if they exist in the dataframe
+                # Add article description fields if they exist
                 for field in ["Article Description", "Product Hierarchy", "Article Long Text (60 Chars)", "Description p. group"]:
                     if field in summary.columns:
                         column_order.append(field)
                 
-                # Add the rest of the original columns
-                original_cols = ["Total_Demand", "Total_Stock_Available", "Total_Stock",
-                               "Total_Pending", "Total_Dispatch", "D001_SaSa_Net_Stock", "Out_of_Stock_Warning"]
-                for col in original_cols:
+                # Add inventory fields
+                inventory_cols = ["Total_Demand", "Total_Stock_Available", "Total_Stock",
+                               "Total_Pending", "Total_Dispatch", "Total_Suggested_DN_Qty", "D001_SaSa_Net_Stock",
+                               "Effective_Inventory", "Enhanced_Inventory_Status", "Inventory_Difference"]
+                for col in inventory_cols:
                     if col in summary.columns:
                         column_order.append(col)
                 
-                # Display with reordered columns
-                st.dataframe(
-                    summary[column_order],
-                    use_container_width=True,
-                )
+                # Display with reordered columns and styling for negative inventory differences
+                if "Inventory_Difference" in summary.columns:
+                    # Create a styled version of the dataframe for display
+                    styled_summary = summary.copy()
+                    
+                    # Apply styling to negative values in Inventory_Difference
+                    def style_negative_diff(val):
+                        if pd.notna(val) and val < 0:
+                            return 'background-color: yellow; color: red; font-weight: bold;'
+                        return ''
+                    
+                    # Apply styling using pandas Styler
+                    styled_display = (
+                        summary[column_order]
+                        .style
+                        .map(style_negative_diff, subset=['Inventory_Difference'])
+                        .format({'Inventory_Difference': '{:.0f}'})
+                    )
+                    
+                    st.dataframe(
+                        styled_display,
+                        width='stretch',
+                    )
+                else:
+                    # Fallback if Inventory_Difference column doesn't exist
+                    st.dataframe(
+                        summary[column_order],
+                        width='stretch',
+                    )
 
             with tab3:
                 st.subheader("SKU Demand vs. Available Stock (Exclude D001)")

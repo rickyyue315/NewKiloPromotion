@@ -81,6 +81,9 @@ def read_input_files(
     # File A - 直接讀取 "Sheet1" 工作表
     try:
         df_a = pd.read_excel(file_a_path, sheet_name="Sheet1", dtype=str)
+        # Ensure Article column is treated as TEXT (string) format
+        if config.COL_A_ARTICLE in df_a.columns:
+            df_a[config.COL_A_ARTICLE] = df_a[config.COL_A_ARTICLE].astype(str)
     except ValueError:
         # 如果失敗，列出所有可用的工作表名稱
         xls_a = pd.ExcelFile(file_a_path)
@@ -93,6 +96,10 @@ def read_input_files(
     # File B
     xls_b = pd.ExcelFile(file_b_path)
     df_b1 = pd.read_excel(xls_b, sheet_name="Sheet 1", dtype=str)
+    # Ensure Article column is treated as TEXT (string) format in File B Sheet 1
+    if config.COL_B1_ARTICLE in df_b1.columns:
+        df_b1[config.COL_B1_ARTICLE] = df_b1[config.COL_B1_ARTICLE].astype(str)
+    
     df_b2 = pd.read_excel(xls_b, sheet_name="Sheet 2", dtype=str)
 
     return df_a, df_b1, df_b2
@@ -281,6 +288,18 @@ def prepare_file_b(
         df_b1.loc[df_b1["Promo_Target_Cover_Days"] <= 0, "Promo_Target_Cover_Days"] = 0
     else:
         df_b1["Promo_Target_Cover_Days"] = 0
+    
+    # Promotion Days (optional)
+    if config.COL_B1_PROMO_DAYS in df_b1.columns:
+        df_b1["Promotion_Days"] = to_numeric(
+            df_b1[config.COL_B1_PROMO_DAYS],
+            config.COL_B1_PROMO_DAYS,
+            warnings,
+        )
+        # zero treated as "not provided"
+        df_b1.loc[df_b1["Promotion_Days"] <= 0, "Promotion_Days"] = 0
+    else:
+        df_b1["Promotion_Days"] = 0
 
     df_b1 = df_b1.rename(
         columns={
@@ -381,6 +400,7 @@ def merge_data(
                 "SKU_Target",
                 "Target_Type",
                 "Promo_Target_Cover_Days",
+                "Promotion_Days",
             ]
         ],
         on="Article",
@@ -479,6 +499,36 @@ def calculate_demand(
     # Suggested Dispatch Qty
     def compute_suggested_dispatch(row) -> int:
         rp = (row.get("RP_Type") or "").upper()
+        
+        # For ND sites with Target, use Target-based calculation
+        if rp == "ND":
+            target_raw = row.get("Site_Promo_Demand", 0)
+            try:
+                target = float(target_raw)
+            except (TypeError, ValueError):
+                target = 0.0
+            if not pd.notna(target) or target <= 0:
+                return 0
+            
+            # MOQ: safe numeric
+            moq_raw = row.get("MOQ", 0)
+            try:
+                moq = float(moq_raw)
+            except (TypeError, ValueError):
+                moq = 0.0
+            if not pd.notna(moq) or moq <= 0:
+                return target if target > 0 else 0
+            
+            # Round up to MOQ multiple
+            try:
+                result = math.ceil(target / moq) * moq
+            except Exception:
+                return 0
+            if not pd.notna(result) or result < 0:
+                return 0
+            return int(result)
+        
+        # Original logic for RF sites
         if rp != config.DISPATCH_RP_TYPE:
             return 0
 
@@ -513,6 +563,163 @@ def calculate_demand(
 
     out["Suggested_Dispatch_Qty"] = out.apply(compute_suggested_dispatch, axis=1)
 
+    # Suggested DN Qty (with conditional 50 cap based on Promotion Days)
+    def compute_suggested_dn_qty(row) -> int:
+        rp = (row.get("RP_Type") or "").upper()
+        
+        # For ND sites with Target, use Target-based calculation
+        if rp == "ND":
+            target_raw = row.get("Site_Promo_Demand", 0)
+            try:
+                target = float(target_raw)
+            except (TypeError, ValueError):
+                target = 0.0
+            if not pd.notna(target) or target <= 0:
+                return 0
+            
+            # MOQ: safe numeric
+            moq_raw = row.get("MOQ", 0)
+            try:
+                moq = float(moq_raw)
+            except (TypeError, ValueError):
+                moq = 0.0
+            if not pd.notna(moq) or moq <= 0:
+                return target if target > 0 else 0
+            
+            # Round up to MOQ multiple
+            try:
+                result = math.ceil(target / moq) * moq
+            except Exception:
+                return 0
+            if not pd.notna(result) or result < 0:
+                return 0
+            
+            # Get Suggested_Dispatch_Qty for reference
+            suggested_dispatch_qty = row.get("Suggested_Dispatch_Qty", 0)
+            try:
+                dispatch_qty = float(suggested_dispatch_qty) if pd.notna(suggested_dispatch_qty) else 0
+            except (TypeError, ValueError):
+                dispatch_qty = 0.0
+            
+            # Apply conditional 50 cap based on Promotion Days
+            promo_days_raw = row.get("Promotion_Days", 0)
+            try:
+                promo_days = float(promo_days_raw)
+            except (TypeError, ValueError):
+                promo_days = 0.0
+            
+            # Only apply 50 cap if Promotion Days > 4
+            if pd.notna(promo_days) and promo_days > 4:
+                # If Suggested_Dispatch_Qty <= 50, use it directly (as MOQ multiple)
+                # If Suggested_Dispatch_Qty > 50, find largest MOQ multiple <= 50
+                if dispatch_qty <= 50:
+                    # Use dispatch_qty but ensure it's a MOQ multiple
+                    if moq > 0 and dispatch_qty > 0:
+                        result = int((dispatch_qty // moq + (1 if dispatch_qty % moq > 0 else 0)) * moq)
+                    else:
+                        result = int(dispatch_qty)
+                else:
+                    # Cap at 50, but ensure it's a MOQ multiple
+                    if moq > 0:
+                        result = int((50 // moq) * moq)
+                    else:
+                        result = 50
+            else:
+                # No cap when Promotion Days <= 4, use Suggested_Dispatch_Qty
+                # Ensure result is a multiple of MOQ
+                if moq > 0 and dispatch_qty > 0:
+                    result = int((dispatch_qty // moq + (1 if dispatch_qty % moq > 0 else 0)) * moq)
+                else:
+                    result = int(dispatch_qty)
+            
+            return round(result)
+        
+        # Original logic for RF sites
+        if rp != config.DISPATCH_RP_TYPE:
+            return 0
+
+        # Net demand: safe numeric
+        net_raw = row.get("Net_Demand_for_Dispatch", 0)
+        try:
+            net = float(net_raw)
+        except (TypeError, ValueError):
+            net = 0.0
+        if not pd.notna(net) or net <= 0:
+            return 0
+
+        # MOQ: safe numeric
+        moq_raw = row.get("MOQ", 0)
+        try:
+            moq = float(moq_raw)
+        except (TypeError, ValueError):
+            moq = 0.0
+        if not pd.notna(moq) or moq <= 0:
+            # no valid MOQ, follow policy: here treat as no dispatch
+            return 0
+
+        base_qty = max(net, moq)
+        # 保證不因 NaN 導致錯誤；ceil 結果若非有限數字則視為 0
+        try:
+            result = math.ceil(base_qty / moq) * moq
+        except Exception:
+            return 0
+        if not pd.notna(result) or result < 0:
+            return 0
+        
+        # Get Suggested_Dispatch_Qty for reference
+        suggested_dispatch_qty = row.get("Suggested_Dispatch_Qty", 0)
+        try:
+            dispatch_qty = float(suggested_dispatch_qty) if pd.notna(suggested_dispatch_qty) else 0
+        except (TypeError, ValueError):
+            dispatch_qty = 0.0
+        
+        # Apply conditional 50 cap based on Promotion Days
+        promo_days_raw = row.get("Promotion_Days", 0)
+        try:
+            promo_days = float(promo_days_raw)
+        except (TypeError, ValueError):
+            promo_days = 0.0
+        
+        # Only apply 50 cap if Promotion Days > 4
+        if pd.notna(promo_days) and promo_days > 4:
+            # If Suggested_Dispatch_Qty <= 50, use it directly (as MOQ multiple)
+            # If Suggested_Dispatch_Qty > 50, find largest MOQ multiple <= 50
+            if dispatch_qty <= 50:
+                # Use dispatch_qty but ensure it's a MOQ multiple
+                if moq > 0 and dispatch_qty > 0:
+                    result = int((dispatch_qty // moq + (1 if dispatch_qty % moq > 0 else 0)) * moq)
+                else:
+                    result = int(dispatch_qty)
+            else:
+                # Cap at 50, but ensure it's a MOQ multiple
+                if moq > 0:
+                    result = int((50 // moq) * moq)
+                else:
+                    result = 50
+        else:
+            # No cap when Promotion Days <= 4, use Suggested_Dispatch_Qty
+            # Ensure result is a multiple of MOQ
+            if moq > 0 and dispatch_qty > 0:
+                result = int((dispatch_qty // moq + (1 if dispatch_qty % moq > 0 else 0)) * moq)
+            else:
+                result = int(dispatch_qty)
+        
+        return round(result)
+
+    out["Suggested_DN_Qty"] = out.apply(compute_suggested_dn_qty, axis=1)
+
+    # Dispatch_Remark for ND dispatch
+    def compute_dispatch_remark(row) -> str:
+        rp = (row.get("RP_Type") or "").upper()
+        if rp == "ND":
+            suggested_dispatch = row.get("Suggested_Dispatch_Qty", 0)
+            suggested_dn = row.get("Suggested_DN_Qty", 0)
+            if (pd.notna(suggested_dispatch) and suggested_dispatch > 0) or (pd.notna(suggested_dn) and suggested_dn > 0):
+                return "ND 派貨"
+        return ""
+    
+    out["Dispatch_Remark"] = out.apply(compute_dispatch_remark, axis=1)
+
     # Dispatch_Type
     def determine_dispatch_type(row) -> str:
         site = (row.get("Site") or "").upper()
@@ -525,10 +732,30 @@ def calculate_demand(
         except (TypeError, ValueError):
             supply = 0
 
+        # Check if Suggested_DN_Qty > 0 for ND sites
+        suggested_dn_qty = row.get("Suggested_DN_Qty", 0)
+        try:
+            dn_qty = float(suggested_dn_qty) if pd.notna(suggested_dn_qty) else 0
+        except (TypeError, ValueError):
+            dn_qty = 0
+
         if site == config.DC_SITE_CODE:
             return "D001"
         if rp == "ND":
-            return "ND"
+            # 確保 Suggested_DN_Qty 為 0 時絕對顯示 "無須補貨"
+            if dn_qty > 0:
+                # For ND sites with DN Qty > 0, use Supply_source to determine
+                # 顯示"Buyer需要訂貨"或"需生成 DN"而不是"ND"，因為Dispatch_Remark已有"ND派貨"提示
+                if supply in (1, 4):
+                    return "Buyer需要訂貨"
+                elif supply == 2:
+                    return "需生成 DN"
+                else:
+                    return "ND"
+            else:
+                # For ND sites with DN Qty = 0, show "無須補貨"
+                # 確保即使有其他因素影響，DN Qty = 0 時也顯示 "無須補貨"
+                return "無須補貨"
         if supply in (1, 4):
             return "Buyer需要訂貨"
         if supply == 2:
@@ -545,8 +772,20 @@ def generate_summary(
     config: Config,
 ) -> pd.DataFrame:
     """
-    Generate summary report per (Group_No, Article) as described:
-
+    Generate summary report per (Group_No, Article) with enhanced inventory status logic:
+    
+    有效庫存 = D001 SaSa_Net_Stock + Shop(H字頭) SaSa_Net_Stock + Shop(H字頭) Pending_Received
+    
+    Supply source (參考Site Code H字頭) 為2時:
+    - Total_Demand>有效庫存 及 D001 SaSa_Net_Stock > 100件 = 庫存足夠, RP team會安排Lot For Lot
+    - Total_Demand>有效庫存 但 D001 SaSa_Net_Stock < 100件 = 庫存足夠目標數量, 但D001少於100件, 在需要時進行搓貨
+    - Total_Demand<有效庫存 = 庫存不足夠, 請Buyer留意
+    
+    Supply source (參考Site Code H字頭) 為1或4時:
+    - Total_Demand>有效庫存 = 庫存足夠
+    - Total_Demand<有效庫存 = 庫存不足夠, 請Buyer開PO
+    
+    Original features:
     - For non-D001 sites: aggregate Total_Demand, SaSa_Net_Stock, Pending_Received, Suggested_Dispatch_Qty.
     - For D001: show DC stock metrics.
     - Out_of_Stock_Warning per SKU based on rules.
@@ -572,6 +811,8 @@ def generate_summary(
         "SaSa_Net_Stock": "sum",
         "Pending_Received": "sum",
         "Suggested_Dispatch_Qty": "sum",
+        "Suggested_DN_Qty": "sum",  # Add Total Suggested DN Qty
+        "Supply_source": "first",  # Keep supply source info
     }
     
     # Add additional fields to aggregation dictionary
@@ -591,6 +832,8 @@ def generate_summary(
         "Total_Stock" if col == "SaSa_Net_Stock" else
         "Total_Pending" if col == "Pending_Received" else
         "Total_Dispatch" if col == "Suggested_Dispatch_Qty" else
+        "Total_Suggested_DN_Qty" if col == "Suggested_DN_Qty" else
+        "Supply_source" if col == "Supply_source" else
         col  # Keep additional fields as-is
         for col in agg_non_dc.columns
     ]
@@ -620,22 +863,77 @@ def generate_summary(
         if col in summary.columns:
             summary[col] = summary[col].fillna(0)
 
-    # Out_of_Stock_Warning
-    warnings = []
-    for _, row in summary.iterrows():
-        total_dispatch = row["Total_Dispatch"]
-        dc_stock = row["D001_SaSa_Net_Stock"]
-        total_demand = row["Total_Demand"]
-        total_stock_avail = row["Total_Stock_Available"]
-
-        if total_dispatch > dc_stock:
-            warnings.append("D001 缺貨")
-        elif total_demand > total_stock_avail:
-            warnings.append("Y")
+    # Calculate effective inventory and enhanced inventory status
+    def calculate_effective_inventory_and_status(row) -> tuple:
+        """
+        計算有效庫存和庫存狀態
+        
+        有效庫存 = D001 SaSa_Net_Stock + Shop(H字頭) SaSa_Net_Stock + Shop(H字頭) Pending_Received
+        """
+        # Get the original detail data for this article to calculate H-site inventory
+        article_detail = detail[detail["Article"] == row["Article"]]
+        
+        # H-site店鋪的庫存 (HA*, HB*, HC*, HD*)
+        h_sites = article_detail[article_detail["Site"].str.match(r"^H[ABCD]", na=False)]
+        h_stock = h_sites["SaSa_Net_Stock"].sum()
+        h_pending = h_sites["Pending_Received"].sum()
+        
+        # 有效庫存 = D001 + H字頭店鋪庫存 + H字頭店鋪待收貨
+        effective_inventory = row["D001_SaSa_Net_Stock"] + h_stock + h_pending
+        
+        # 獲取 Supply source (參考Site Code H字頭)
+        # 如果有H字頭店鋪，使用第一個H字頭店鋪的Supply_source
+        # 否則使用第一個非D001店鋪的Supply_source
+        if not h_sites.empty:
+            supply_source = h_sites["Supply_source"].iloc[0]
         else:
-            warnings.append("N")
+            non_dc_sites = article_detail[article_detail["Site"] != config.DC_SITE_CODE]
+            if not non_dc_sites.empty:
+                supply_source = non_dc_sites["Supply_source"].iloc[0]
+            else:
+                supply_source = 0
+        
+        # 安全轉換為整數
+        try:
+            supply_source = int(supply_source) if pd.notna(supply_source) else 0
+        except (TypeError, ValueError):
+            supply_source = 0
+        
+        total_demand = row["Total_Demand"]
+        d001_stock = row["D001_SaSa_Net_Stock"]
+        
+        # 根據Supply source判斷庫存狀態
+        if supply_source == 2:
+            if effective_inventory >= total_demand:
+                if d001_stock > 100:
+                    status = "庫存足夠, RP team會安排Lot For Lot"
+                else:
+                    status = "庫存足夠目標數量, 但D001少於100件, 在需要時進行搓貨"
+            else:
+                status = "庫存不足夠, 請Buyer留意"
+        elif supply_source in (1, 4):
+            if effective_inventory >= total_demand:
+                status = "庫存足夠"
+            else:
+                status = "庫存不足夠, 請Buyer開PO"
+        else:
+            # 默認情況，使用原有的簡單邏輯
+            if row["Total_Dispatch"] > d001_stock:
+                status = "D001 缺貨"
+            elif total_demand > row["Total_Stock_Available"]:
+                status = "Y"
+            else:
+                status = "N"
+        
+        return effective_inventory, status
 
-    summary["Out_of_Stock_Warning"] = warnings
+    # Apply the enhanced inventory status calculation
+    result = summary.apply(calculate_effective_inventory_and_status, axis=1, result_type='expand')
+    summary["Effective_Inventory"] = result[0]
+    summary["Enhanced_Inventory_Status"] = result[1]
+
+    # Calculate inventory difference (Effective_Inventory - Total_Demand)
+    summary["Inventory_Difference"] = summary["Effective_Inventory"] - summary["Total_Demand"]
 
     return summary
 
@@ -697,7 +995,7 @@ def export_to_excel(
     merge_keys = ["Article", "Site"]
     
     # Get the additional columns from detail
-    additional_cols = ["Suggested_Dispatch_Qty", "Dispatch_Type", "SKU_Target", "Site_Target_%", "Total_Demand"]
+    additional_cols = ["Suggested_Dispatch_Qty", "Suggested_DN_Qty", "Dispatch_Type", "SKU_Target", "Site_Target_%", "Total_Demand"]
     additional_data = detail[merge_keys + additional_cols].copy()
     
     # Remove duplicates in additional_data to ensure clean merge
@@ -716,15 +1014,25 @@ def export_to_excel(
         "Article",
         "Site",
         "RP_Type",
+        "Supply_source",
+        "Is_Promo_SKU",
         "SaSa_Net_Stock",
         "Pending_Received",
         "Safety_Stock",
-        "SKU_Target",
-        "Site_Target_%",
-        "Is_Promo_SKU",
+        "Last_Month_Sold_Qty_capped",
+        "Daily_Sales_Rate",
+        "Effective_Target_Cover_Days",
+        "Base_Demand",
+        "Site_Promo_Demand",
         "Total_Demand",
+        "Net_Demand_raw",
+        "Net_Demand_for_Dispatch",
+        "MOQ",
+        "Promotion_Days",  # New field
         "Suggested_Dispatch_Qty",
+        "Suggested_DN_Qty",
         "Dispatch_Type",
+        "Dispatch_Remark",
     ]
     # Keep only existing columns, avoid KeyError
     detail_simple_cols = [c for c in detail_keep_cols if c in detail.columns]
@@ -733,17 +1041,20 @@ def export_to_excel(
     summary_keep_cols = [
         "Group_No",
         "Article",
+        "Article Description",
+        "Product Hierarchy",
+        "Article Long Text (60 Chars)",
+        "Description p. group",
         "Total_Demand",
         "Total_Stock_Available",
         "Total_Stock",
         "Total_Pending",
         "Total_Dispatch",
+        "Total_Suggested_DN_Qty",  # New field
         "D001_SaSa_Net_Stock",
-        "Out_of_Stock_Warning",
-        "Article Description",
-        "Product Hierarchy",
-        "Article Long Text (60 Chars)",
-        "Description p. group",
+        "Effective_Inventory",  # New field
+        "Enhanced_Inventory_Status",  # New field
+        "Inventory_Difference",  # New field - Effective_Inventory - Total_Demand
     ]
     summary_simple_cols = [c for c in summary_keep_cols if c in summary.columns]
     summary_simple = summary[summary_simple_cols].copy()
