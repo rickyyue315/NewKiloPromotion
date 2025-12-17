@@ -1,5 +1,6 @@
 import io
 from pathlib import Path
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -269,10 +270,15 @@ def run_app():
                 )
                 output_buffer.seek(0)
 
+            # Generate timestamp in YYYYMMDDHHMM format
+            current_time = datetime.now()
+            timestamp = current_time.strftime("%Y%m%d%H%M")
+            file_name_with_timestamp = f"Promotion_Planning_Result_{timestamp}.xlsx"
+            
             st.download_button(
                 label="下載 Excel 報告 / Download Excel Report",
                 data=output_buffer,
-                file_name="Promotion_Planning_Result.xlsx",
+                file_name=file_name_with_timestamp,
                 mime=(
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 ),

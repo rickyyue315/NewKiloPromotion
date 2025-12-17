@@ -1,6 +1,7 @@
 import math
 import sys
 from pathlib import Path
+from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 
 import pandas as pd
@@ -1103,6 +1104,13 @@ def main(
         file_b = sys.argv[2]
     if len(sys.argv) >= 5:
         output = sys.argv[4]
+    
+    # Generate timestamp in YYYYMMDDHHMM format if not already present
+    if "_20" not in output:  # Check if timestamp already exists
+        current_time = datetime.now()
+        timestamp = current_time.strftime("%Y%m%d%H%M")
+        name, ext = output.rsplit('.', 1) if '.' in output else (output, '.xlsx')
+        output = f"{name}_{timestamp}.{ext}"
 
     file_a_path = Path(file_a)
     file_b_path = Path(file_b)
