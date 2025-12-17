@@ -61,17 +61,21 @@ def run_app():
     st.title("零售推廣目標檢視及派貨系統")
     st.caption("Retail Promotion Demand & Dispatch Planning - Streamlit Interface")
 
-    # File upload area
+    # File upload area - 左右並排顯示
+    # 說明置中於整個畫面上方，避免單欄內的說明造成欄位高度不一致導致元件無法對齊
+    st.info("SAP ZRPMM0015_S report (Layout 使用: /SHOP_ALL 會顯示未 Launch SKU)")
     col_a, col_b = st.columns(2)
     with col_a:
+        st.markdown("**Upload File A (Promotion Target File A.XLSX)**")
         file_a = st.file_uploader(
-            "Upload File A (Promotion Target File A.XLSX)",
+            "選擇 File A",
             type=["xlsx", "xls"],
             key="file_a",
         )
     with col_b:
+        st.markdown("**Upload File B (Promotion Target File B.xlsx)**")
         file_b = st.file_uploader(
-            "Upload File B (Promotion Target File B.xlsx)",
+            "選擇 File B",
             type=["xlsx", "xls"],
             key="file_b",
         )

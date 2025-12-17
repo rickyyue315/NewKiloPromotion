@@ -45,6 +45,7 @@ class Config:
     COL_A_LAST_MONTH_SOLD: str = "Last Month Sold Qty"
     COL_A_MOQ: str = "MOQ"
     COL_A_SUPPLY_SOURCE: str = "Supply source"
+    COL_A_LAUNCH_DATE: str = "Launch Date"
     COL_A_IN_QLTY: str = "In Quality Insp."
     COL_A_BLOCKED: str = "Blocked"
 
@@ -185,6 +186,12 @@ def prepare_file_a(df_a_raw: pd.DataFrame, config: Config) -> Tuple[pd.DataFrame
         df["Blocked"] = to_numeric(df[config.COL_A_BLOCKED], config.COL_A_BLOCKED, warnings)
     else:
         df["Blocked"] = 0
+
+    # Launch Date processing
+    if config.COL_A_LAUNCH_DATE in df.columns:
+        df["Launch_Date"] = df[config.COL_A_LAUNCH_DATE].fillna("").astype(str).str.strip()
+    else:
+        df["Launch_Date"] = ""
 
     # Cap Last Month Sold Qty
     capped_mask = df["Last_Month_Sold_Qty"] > config.LAST_MONTH_SOLD_CAP
@@ -378,7 +385,7 @@ def merge_data(
         )
     else:
         warnings.append(
-            f"✓ Article match summary: {len(matched_articles)} matched, "
+            f"[OK] Article match summary: {len(matched_articles)} matched, "
             f"{len(unmatched_in_a)} in File A only, "
             f"{len(unmatched_in_b1)} in File B only."
         )
@@ -740,6 +747,16 @@ def calculate_demand(
         except (TypeError, ValueError):
             dn_qty = 0
 
+        # Check Launch Date for new SKU logic - HIGHEST PRIORITY
+        launch_date = row.get("Launch_Date", "")
+        launch_date_str = str(launch_date).strip() if pd.notna(launch_date) else ""
+        is_new_sku = launch_date_str == "" or launch_date_str.lower() in ("nan", "null", "none")
+
+        # New SKU logic: If Launch Date is blank and Suggested_DN_Qty > 0, show new SKU message
+        # This check must come FIRST before any other logic
+        if is_new_sku and dn_qty > 0:
+            return "新SKU必須由Buyer首次派貨"
+
         if site == config.DC_SITE_CODE:
             return "D001"
         if rp == "ND":
@@ -936,6 +953,55 @@ def generate_summary(
     # Calculate inventory difference (Effective_Inventory - Total_Demand)
     summary["Inventory_Difference"] = summary["Effective_Inventory"] - summary["Total_Demand"]
 
+    # Add New SKU Alert for Summary_Report
+    def check_new_sku_alert(row) -> str:
+        """
+        檢查該SKU是否為新SKU且需要提示
+        """
+        article = row["Article"]
+        
+        # Get all detail rows for this article
+        article_detail = detail[detail["Article"] == article]
+        
+        # Check if any row has Launch_Date blank and Suggested_DN_Qty > 0
+        for _, detail_row in article_detail.iterrows():
+            launch_date = detail_row.get("Launch_Date", "")
+            launch_date_str = str(launch_date).strip() if pd.notna(launch_date) else ""
+            is_new_sku = launch_date_str == "" or launch_date_str.lower() in ("nan", "null", "none")
+            
+            suggested_dn_qty = detail_row.get("Suggested_DN_Qty", 0)
+            try:
+                dn_qty = float(suggested_dn_qty) if pd.notna(suggested_dn_qty) else 0
+            except (TypeError, ValueError):
+                dn_qty = 0
+            
+            if is_new_sku and dn_qty > 0:
+                return "新SKU必須由Buyer首次派貨"
+        
+        return ""
+    
+    summary["New_SKU_Alert"] = summary.apply(check_new_sku_alert, axis=1)
+    
+    # Update Enhanced_Inventory_Status to include New SKU alert
+    def update_enhanced_inventory_status(row) -> str:
+        """
+        更新 Enhanced_Inventory_Status，如果有新SKU提示，則在原有提示前加入新SKU提示
+        """
+        current_status = row["Enhanced_Inventory_Status"]
+        new_sku_alert = row["New_SKU_Alert"]
+        
+        # 如果有新SKU提示且原有狀態不為空，則在原有狀態前加入新SKU提示
+        if new_sku_alert and current_status:
+            return f"{new_sku_alert}, {current_status}"
+        elif new_sku_alert:
+            # 如果原有狀態為空但新SKU提示不為空，則只顯示新SKU提示
+            return new_sku_alert
+        else:
+            # 如果都沒有，則保持原有狀態
+            return current_status
+    
+    summary["Enhanced_Inventory_Status"] = summary.apply(update_enhanced_inventory_status, axis=1)
+
     return summary
 
 
@@ -1056,6 +1122,7 @@ def export_to_excel(
         "Effective_Inventory",  # New field
         "Enhanced_Inventory_Status",  # New field
         "Inventory_Difference",  # New field - Effective_Inventory - Total_Demand
+        "New_SKU_Alert",  # New field - New SKU alert
     ]
     summary_simple_cols = [c for c in summary_keep_cols if c in summary.columns]
     summary_simple = summary[summary_simple_cols].copy()
