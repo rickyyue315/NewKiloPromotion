@@ -31,7 +31,7 @@ def run_app():
     lead_time = st.sidebar.slider(
         "Lead Time (Days)",
         min_value=0,
-        max_value=60,
+        max_value=14,
         value=cfg.DEFAULT_LEAD_TIME,
         step=1,
         help="Used in: Base Demand = Daily Sales Rate × (Target Cover Days + Lead Time).",

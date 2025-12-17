@@ -19,7 +19,7 @@ class Config:
     DEFAULT_TARGET_COVER_DAYS: int = 7
 
     # Lead time default (can be overridden by CLI arg or UI)
-    DEFAULT_LEAD_TIME: int = 7
+    DEFAULT_LEAD_TIME: int = 0
 
     # Max cap for Last Month Sold Qty
     LAST_MONTH_SOLD_CAP: int = 100000
