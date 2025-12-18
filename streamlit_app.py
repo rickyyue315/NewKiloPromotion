@@ -127,8 +127,19 @@ def run_app():
             
             if all_warnings:
                 with st.expander("Data Quality Warnings", expanded=True if critical_warnings else False):
+                    # 檢查特定關鍵詞的警告
+                    critical_keywords = ["Articles in File B but not in File A", "Articles in File A but not in File B"]
+                    
                     for w in all_warnings:
-                        st.warning(w)
+                        # 檢查是否包含關鍵詞
+                        is_critical_warning = any(keyword in w for keyword in critical_keywords)
+                        
+                        if is_critical_warning:
+                            # 使用紅字粗體顯示關鍵警告
+                            st.markdown(f"**<span style='color:red;'>{w}</span>**", unsafe_allow_html=True)
+                        else:
+                            # 普通警告使用默認樣式
+                            st.warning(w)
 
             # Main result tabs
             tab1, tab2, tab3 = st.tabs(

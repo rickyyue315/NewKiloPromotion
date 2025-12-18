@@ -507,6 +507,42 @@ def calculate_demand(
     # Suggested Dispatch Qty
     def compute_suggested_dispatch(row) -> int:
         rp = (row.get("RP_Type") or "").upper()
+        site = (row.get("Site") or "").upper()
+        
+        # HB87 特殊邏輯：當沒有 Target 時使用特殊公式
+        if site == "HB87" and rp == "RF":
+            # 檢查是否有 Target (Site_Promo_Demand > 0 表示有 Target)
+            site_promo_demand = row.get("Site_Promo_Demand", 0)
+            if pd.notna(site_promo_demand) and site_promo_demand <= 0:
+                # 沒有 Target，使用特殊公式計算
+                safety_stock = row.get("Safety_Stock", 0)
+                sasa_net_stock = row.get("SaSa_Net_Stock", 0)
+                pending_received = row.get("Pending_Received", 0)
+                moq = row.get("MOQ", 0)
+                
+                try:
+                    safety_stock = float(safety_stock) if pd.notna(safety_stock) else 0
+                    sasa_net_stock = float(sasa_net_stock) if pd.notna(sasa_net_stock) else 0
+                    pending_received = float(pending_received) if pd.notna(pending_received) else 0
+                    moq = float(moq) if pd.notna(moq) else 0
+                except (TypeError, ValueError):
+                    return 0
+                
+                # 計算 Safety Stock - SaSa Net Stock - Pending Received
+                raw_value = safety_stock - sasa_net_stock - pending_received
+                
+                # 如果結果 <= 0 或 MOQ <= 0，則不需要派貨
+                if raw_value <= 0 or moq <= 0:
+                    return 0
+                
+                # 使用 Mround (四捨五入到最接近的 MOQ 倍數)
+                # Python 中實現 Mround: round(raw_value / moq) * moq
+                result = round(raw_value / moq) * moq
+                
+                # 確保結果不小於 MOQ
+                result = max(result, moq)
+                
+                return int(result)
         
         # For ND sites with Target, use Target-based calculation
         if rp == "ND":
@@ -719,6 +755,16 @@ def calculate_demand(
     # Dispatch_Remark for ND dispatch
     def compute_dispatch_remark(row) -> str:
         rp = (row.get("RP_Type") or "").upper()
+        site = (row.get("Site") or "").upper()
+        
+        # HB87-RF 特殊提示
+        if site == "HB87" and rp == "RF":
+            site_promo_demand = row.get("Site_Promo_Demand", 0)
+            if pd.notna(site_promo_demand) and site_promo_demand <= 0:
+                suggested_dispatch = row.get("Suggested_Dispatch_Qty", 0)
+                if pd.notna(suggested_dispatch) and suggested_dispatch > 0:
+                    return "HB87-RF派貨"
+        
         if rp == "ND":
             suggested_dispatch = row.get("Suggested_Dispatch_Qty", 0)
             suggested_dn = row.get("Suggested_DN_Qty", 0)
