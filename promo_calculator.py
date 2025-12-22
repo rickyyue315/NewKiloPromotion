@@ -606,7 +606,43 @@ def calculate_demand(
         return int(result)
 
     out["Suggested_Dispatch_Qty"] = out.apply(compute_suggested_dispatch, axis=1)
-
+    
+    # Target Dispatch: Mround((店舖推廣目標需求量 - SaSa Net Stock - Pending Received), MOQ)
+    def compute_target_dispatch(row) -> int:
+        """
+        計算 Target Dispatch: Mround((店舖推廣目標需求量 - SaSa Net Stock - Pending Received), MOQ)
+        """
+        site_promo_demand = row.get("Site_Promo_Demand", 0)
+        sasa_net_stock = row.get("SaSa_Net_Stock", 0)
+        pending_received = row.get("Pending_Received", 0)
+        moq = row.get("MOQ", 0)
+        
+        try:
+            site_promo_demand = float(site_promo_demand) if pd.notna(site_promo_demand) else 0
+            sasa_net_stock = float(sasa_net_stock) if pd.notna(sasa_net_stock) else 0
+            pending_received = float(pending_received) if pd.notna(pending_received) else 0
+            moq = float(moq) if pd.notna(moq) else 0
+        except (TypeError, ValueError):
+            return 0
+        
+        # 計算店舖推廣目標需求量 - SaSa Net Stock - Pending Received
+        raw_value = site_promo_demand - sasa_net_stock - pending_received
+        
+        # 如果結果 <= 0 或 MOQ <= 0，則不需要派貨
+        if raw_value <= 0 or moq <= 0:
+            return 0
+        
+        # 使用 Mround (四捨五入到最接近的 MOQ 倍數)
+        # Python 中實現 Mround: round(raw_value / moq) * moq
+        result = round(raw_value / moq) * moq
+        
+        # 確保結果不小於 MOQ
+        result = max(result, moq)
+        
+        return int(result)
+    
+    out["Target_Dispatch"] = out.apply(compute_target_dispatch, axis=1)
+    
     # Suggested DN Qty (with conditional 50 cap based on Promotion Days)
     def compute_suggested_dn_qty(row) -> int:
         rp = (row.get("RP_Type") or "").upper()
@@ -876,6 +912,7 @@ def generate_summary(
         "Pending_Received": "sum",
         "Suggested_Dispatch_Qty": "sum",
         "Suggested_DN_Qty": "sum",  # Add Total Suggested DN Qty
+        "Target_Dispatch": "sum",  # Add Total Target Dispatch
         "Supply_source": "first",  # Keep supply source info
     }
     
@@ -897,6 +934,7 @@ def generate_summary(
         "Total_Pending" if col == "Pending_Received" else
         "Total_Dispatch" if col == "Suggested_Dispatch_Qty" else
         "Total_Suggested_DN_Qty" if col == "Suggested_DN_Qty" else
+        "Total_Target_Dispatch" if col == "Target_Dispatch" else
         "Supply_source" if col == "Supply_source" else
         col  # Keep additional fields as-is
         for col in agg_non_dc.columns
@@ -1047,6 +1085,44 @@ def generate_summary(
             return current_status
     
     summary["Enhanced_Inventory_Status"] = summary.apply(update_enhanced_inventory_status, axis=1)
+    
+    # Add D001 Stock Shortage Alert
+    def check_d001_stock_shortage(row) -> str:
+        """
+        檢查 D001 庫存是否不足夠 Total_Suggested_DN_Qty 或 Total_Target_Dispatch
+        """
+        d001_stock = row["D001_SaSa_Net_Stock"]
+        total_suggested_dn_qty = row["Total_Suggested_DN_Qty"]
+        total_target_dispatch = row["Total_Target_Dispatch"]
+        
+        # 檢查是否需要提示 D001 不夠
+        shortage_alert = ""
+        if d001_stock < total_suggested_dn_qty or d001_stock < total_target_dispatch:
+            shortage_alert = "D001 not enough for RP team to add dispatch"
+        
+        return shortage_alert
+    
+    summary["D001_Stock_Shortage_Alert"] = summary.apply(check_d001_stock_shortage, axis=1)
+    
+    # Update Enhanced_Inventory_Status to include D001 shortage alert
+    def update_status_with_d001_shortage(row) -> str:
+        """
+        更新 Enhanced_Inventory_Status，如果有 D001 庫存不足提示，則加入現有狀態
+        """
+        current_status = row["Enhanced_Inventory_Status"]
+        shortage_alert = row["D001_Stock_Shortage_Alert"]
+        
+        # 如果有 D001 庫存不足提示且現有狀態不為空，則在現有狀態後加入提示
+        if shortage_alert and current_status:
+            return f"{current_status}, {shortage_alert}"
+        elif shortage_alert:
+            # 如果現有狀態為空但 D001 庫存不足提示不為空，則只顯示 D001 庫存不足提示
+            return shortage_alert
+        else:
+            # 如果都沒有，則保持現有狀態
+            return current_status
+    
+    summary["Enhanced_Inventory_Status"] = summary.apply(update_status_with_d001_shortage, axis=1)
 
     return summary
 
@@ -1144,6 +1220,7 @@ def export_to_excel(
         "Promotion_Days",  # New field
         "Suggested_Dispatch_Qty",
         "Suggested_DN_Qty",
+        "Target_Dispatch",  # New field
         "Dispatch_Type",
         "Dispatch_Remark",
     ]
@@ -1164,11 +1241,13 @@ def export_to_excel(
         "Total_Pending",
         "Total_Dispatch",
         "Total_Suggested_DN_Qty",  # New field
+        "Total_Target_Dispatch",  # New field
         "D001_SaSa_Net_Stock",
         "Effective_Inventory",  # New field
         "Enhanced_Inventory_Status",  # New field
         "Inventory_Difference",  # New field - Effective_Inventory - Total_Demand
         "New_SKU_Alert",  # New field - New SKU alert
+        "D001_Stock_Shortage_Alert",  # New field - D001 stock shortage alert
     ]
     summary_simple_cols = [c for c in summary_keep_cols if c in summary.columns]
     summary_simple = summary[summary_simple_cols].copy()
