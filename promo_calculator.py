@@ -927,6 +927,7 @@ def generate_summary(
         "Suggested_DN_Qty": "sum",  # Add Total Suggested DN Qty
         "Target_Dispatch": "sum",  # Add Total Target Dispatch
         "Supply_source": "first",  # Keep supply source info
+        "SKU_Target": "first",  # Add SKU Target for reference
     }
     
     # Add additional fields to aggregation dictionary
@@ -1249,6 +1250,7 @@ def export_to_excel(
         "Product Hierarchy",
         "Article Long Text (60 Chars)",
         "Description p. group",
+        "SKU_Target",  # Add SKU Target for reference
         "Total_Demand",
         "Total_Stock_Available",
         "Total_Stock",
