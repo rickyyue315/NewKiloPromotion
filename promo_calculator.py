@@ -478,9 +478,22 @@ def calculate_demand(
     # Promotion Demand
     out["Site_Promo_Demand"] = 0.0
     promo_mask = out["Is_Promo_SKU"]
-    out.loc[promo_mask, "Site_Promo_Demand"] = (
-        out.loc[promo_mask, "SKU_Target"] * out.loc[promo_mask, "Site_Target_%"]
-    )
+    
+    # Calculate Site_Promo_Demand using the correct formula:
+    # Site_Promo_Demand = SKU_Target × Site_Target_% / Promotion_Days × Target_Cover_Days
+    # Note: Use Effective_Target_Cover_Days (with default value handling) instead of Promo_Target_Cover_Days
+    # Handle division by zero for Promotion_Days
+    promo_days = out["Promotion_Days"].copy()
+    promo_days_safe = promo_days.where(promo_days > 0, 1)  # Avoid division by zero, use 1 as default
+    
+    # Calculate Site_Promo_Demand only for promo SKUs
+    if promo_mask.any():
+        out.loc[promo_mask, "Site_Promo_Demand"] = (
+            out.loc[promo_mask, "SKU_Target"] *
+            out.loc[promo_mask, "Site_Target_%"] /
+            promo_days_safe.loc[promo_mask] *
+            out.loc[promo_mask, "Effective_Target_Cover_Days"]
+        )
 
     # Total_Demand
     out["Total_Demand"] = out["Base_Demand"] + out["Site_Promo_Demand"]
@@ -1217,7 +1230,8 @@ def export_to_excel(
         "Net_Demand_raw",
         "Net_Demand_for_Dispatch",
         "MOQ",
-        "Promotion_Days",  # New field
+        "Promotion_Days",  # Promotion Days
+        "Promo_Target_Cover_Days",  # Target Cover Days
         "Suggested_Dispatch_Qty",
         "Suggested_DN_Qty",
         "Target_Dispatch",  # New field
