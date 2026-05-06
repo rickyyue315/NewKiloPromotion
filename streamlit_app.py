@@ -195,9 +195,9 @@ def run_app():
                 
                 # Add inventory fields
                 inventory_cols = ["Total_Demand", "Total_Stock_Available", "Total_Stock",
-                               "Total_Pending", "Total_Dispatch", "Total_Suggested_DN_Qty", "D001_SaSa_Net_Stock",
+                               "Total_Pending", "Total_Dispatch", "Total_Suggested_DN_Qty", "D001_SaSa_Net_Stock", "D001_Pending_Received",
                                "Effective_Inventory", "Enhanced_Inventory_Status", "Inventory_Difference",
-                               "Target_Qty_Difference"]
+                               "Target_Qty_Difference", "Target_Qty_Shortage_Status"]
                 for col in inventory_cols:
                     if col in summary.columns:
                         column_order.append(col)
@@ -207,15 +207,9 @@ def run_app():
                     # Create a styled version of the dataframe for display
                     styled_summary = summary.copy()
                     
-                    # Apply styling to negative values in Inventory_Difference
+                    # Apply styling to negative values (shortage)
                     def style_negative_diff(val):
                         if pd.notna(val) and val < 0:
-                            return 'background-color: yellow; color: red; font-weight: bold;'
-                        return ''
-                    
-                    # Apply styling to positive values in Target_Qty_Difference (shortage)
-                    def style_positive_diff(val):
-                        if pd.notna(val) and val > 0:
                             return 'background-color: yellow; color: red; font-weight: bold;'
                         return ''
                     
@@ -224,7 +218,7 @@ def run_app():
                         summary[column_order]
                         .style
                         .map(style_negative_diff, subset=['Inventory_Difference'])
-                        .map(style_positive_diff, subset=['Target_Qty_Difference'])
+                        .map(style_negative_diff, subset=['Target_Qty_Difference'])
                         .format({'Inventory_Difference': '{:.0f}', 'Target_Qty_Difference': '{:.0f}'})
                     )
                     

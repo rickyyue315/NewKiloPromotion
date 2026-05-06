@@ -918,41 +918,43 @@ def generate_summary(
             # For additional fields, we'll take the first non-null value per group
             additional_fields.append(field)
 
-    # Build aggregation dictionary with correct column names
-    agg_dict = {
+    # Demand/dispatch aggregation: ALL non-D001 sites
+    agg_dict_demand = {
         "Total_Demand": "sum",
-        "SaSa_Net_Stock": "sum",
-        "Pending_Received": "sum",
         "Suggested_Dispatch_Qty": "sum",
-        "Suggested_DN_Qty": "sum",  # Add Total Suggested DN Qty
-        "Target_Dispatch": "sum",  # Add Total Target Dispatch
-        "Supply_source": "first",  # Keep supply source info
-        "SKU_Target": "first",  # Add SKU Target for reference
+        "Suggested_DN_Qty": "sum",
+        "Target_Dispatch": "sum",
+        "Supply_source": "first",
+        "SKU_Target": "first",
     }
     
-    # Add additional fields to aggregation dictionary
+    # Add additional fields to demand aggregation dictionary
     for field in additional_fields:
-        agg_dict[field] = "first"
+        agg_dict_demand[field] = "first"
 
     agg_non_dc = (
         non_dc.groupby(grp_keys, as_index=False)
-        .agg(agg_dict)
+        .agg(agg_dict_demand)
     )
     
-    # Rename columns to match expected output format
-    agg_non_dc.columns = [
-        "Group_No" if col == "Group_No" else
-        "Article" if col == "Article" else
-        "Total_Demand" if col == "Total_Demand" else
-        "Total_Stock" if col == "SaSa_Net_Stock" else
-        "Total_Pending" if col == "Pending_Received" else
-        "Total_Dispatch" if col == "Suggested_Dispatch_Qty" else
-        "Total_Suggested_DN_Qty" if col == "Suggested_DN_Qty" else
-        "Total_Target_Dispatch" if col == "Target_Dispatch" else
-        "Supply_source" if col == "Supply_source" else
-        col  # Keep additional fields as-is
-        for col in agg_non_dc.columns
-    ]
+    # Rename demand/dispatch columns to match expected output format
+    agg_non_dc = agg_non_dc.rename(columns={
+        "Suggested_Dispatch_Qty": "Total_Dispatch",
+        "Suggested_DN_Qty": "Total_Suggested_DN_Qty",
+        "Target_Dispatch": "Total_Target_Dispatch",
+    })
+    
+    # H-site stock aggregation: only HA, HB, HC, HD sites
+    h_site_non_dc = non_dc[non_dc["Site"].str.match(r"^H[ABCD]", na=False)]
+    h_agg = h_site_non_dc.groupby(grp_keys, as_index=False).agg(
+        Total_Stock=("SaSa_Net_Stock", "sum"),
+        Total_Pending=("Pending_Received", "sum"),
+    )
+    
+    # Merge H-site stock into demand aggregation
+    agg_non_dc = agg_non_dc.merge(h_agg, on=grp_keys, how="left")
+    agg_non_dc["Total_Stock"] = agg_non_dc["Total_Stock"].fillna(0)
+    agg_non_dc["Total_Pending"] = agg_non_dc["Total_Pending"].fillna(0)
     agg_non_dc["Total_Stock_Available"] = agg_non_dc["Total_Stock"] + agg_non_dc["Total_Pending"]
 
     # D001 info: assume at most one row per (Article) for DC; if multiple, sum
@@ -1040,9 +1042,39 @@ def generate_summary(
     # Calculate inventory difference (Effective_Inventory - Total_Demand)
     summary["Inventory_Difference"] = summary["Effective_Inventory"] - summary["Total_Demand"]
 
-    # Calculate target quantity difference (SKU_Target - Total_Stock_Available)
-    # Positive values = shortage (need more stock), negative values = surplus
-    summary["Target_Qty_Difference"] = summary["SKU_Target"] - summary["Total_Stock_Available"]
+    # Calculate target quantity difference: Total Stock - SKU_Target
+    # Negative values = shortage (stock insufficient), positive values = surplus
+    # Supply_source 2: includes D001 Net Stock; Supply_source 1/4: H-sites only
+    def calc_target_qty_diff(row) -> float:
+        supply = row.get("Supply_source", 0)
+        try:
+            supply = int(supply) if pd.notna(supply) else 0
+        except (TypeError, ValueError):
+            supply = 0
+        total_stock = float(row.get("Total_Stock_Available", 0))
+        if supply == 2:
+            total_stock += float(row.get("D001_SaSa_Net_Stock", 0))
+        sku_target = float(row.get("SKU_Target", 0))
+        return total_stock - sku_target
+
+    summary["Target_Qty_Difference"] = summary.apply(calc_target_qty_diff, axis=1)
+
+    # Add Target_Qty_Shortage_Status based on Supply_source
+    def calc_shortage_status(row) -> str:
+        diff = row["Target_Qty_Difference"]
+        if pd.notna(diff) and diff < 0:
+            supply = row.get("Supply_source", 0)
+            try:
+                supply = int(supply) if pd.notna(supply) else 0
+            except (TypeError, ValueError):
+                supply = 0
+            if supply == 2:
+                return "庫存不足"
+            elif supply in (1, 4):
+                return "庫存現時不足, 因為是行貨, 需要Buyer open PO"
+        return ""
+
+    summary["Target_Qty_Shortage_Status"] = summary.apply(calc_shortage_status, axis=1)
 
     # Add New SKU Alert for Summary_Report
     def check_new_sku_alert(row) -> str:
@@ -1254,11 +1286,13 @@ def export_to_excel(
         "Total_Target_Dispatch",  # New field
         "Target_Qty_Difference",  # New field - SKU_Target - Total_Stock_Available
         "D001_SaSa_Net_Stock",
+        "D001_Pending_Received",
         "Effective_Inventory",  # New field
         "Enhanced_Inventory_Status",  # New field
         "Inventory_Difference",  # New field - Effective_Inventory - Total_Demand
         "New_SKU_Alert",  # New field - New SKU alert
         "D001_Stock_Shortage_Alert",  # New field - D001 stock shortage alert
+        "Target_Qty_Shortage_Status",  # New field - shortage status based on Supply_source
     ]
     summary_simple_cols = [c for c in summary_keep_cols if c in summary.columns]
     summary_simple = summary[summary_simple_cols].copy()
