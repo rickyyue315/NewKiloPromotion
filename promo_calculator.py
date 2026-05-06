@@ -1019,10 +1019,12 @@ def generate_summary(
             else:
                 status = "庫存不足夠, 請Buyer留意"
         elif supply_source in (1, 4):
-            if effective_inventory >= total_demand:
+            sku_target = float(row.get("SKU_Target", 0) if pd.notna(row.get("SKU_Target", 0)) else 0)
+            h_site_total = h_stock + h_pending
+            if h_site_total >= sku_target:
                 status = "庫存足夠"
             else:
-                status = "庫存不足夠, 請Buyer開PO"
+                status = "庫存現時不足, 因為是行貨, 需要Buyer open PO"
         else:
             # 默認情況，使用原有的簡單邏輯
             if row["Total_Dispatch"] > d001_stock:
@@ -1063,15 +1065,7 @@ def generate_summary(
     def calc_shortage_status(row) -> str:
         diff = row["Target_Qty_Difference"]
         if pd.notna(diff) and diff < 0:
-            supply = row.get("Supply_source", 0)
-            try:
-                supply = int(supply) if pd.notna(supply) else 0
-            except (TypeError, ValueError):
-                supply = 0
-            if supply == 2:
-                return "庫存不足"
-            elif supply in (1, 4):
-                return "庫存現時不足, 因為是行貨, 需要Buyer open PO"
+            return "Yes"
         return ""
 
     summary["Target_Qty_Shortage_Status"] = summary.apply(calc_shortage_status, axis=1)
@@ -1130,6 +1124,14 @@ def generate_summary(
         """
         檢查 D001 庫存是否不足夠 Total_Suggested_DN_Qty 或 Total_Target_Dispatch
         """
+        supply = row.get("Supply_source", 0)
+        try:
+            supply = int(supply) if pd.notna(supply) else 0
+        except (TypeError, ValueError):
+            supply = 0
+        if supply in (1, 4):
+            return ""
+        
         d001_stock = row["D001_SaSa_Net_Stock"]
         total_suggested_dn_qty = row["Total_Suggested_DN_Qty"]
         total_target_dispatch = row["Total_Target_Dispatch"]
