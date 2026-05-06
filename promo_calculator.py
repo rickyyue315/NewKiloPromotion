@@ -1015,7 +1015,7 @@ def generate_summary(
                                + d001_stock
                                - float(row.get("SKU_Target", 0)))
             if target_qty_diff < 0:
-                status = "庫存不足夠, 請Buyer留意, D001 not enough for RP team to add dispatch"
+                status = "庫存不足夠, 請Buyer留意"
             elif effective_inventory >= total_demand:
                 if d001_stock > 100:
                     status = "庫存足夠, RP team會安排Lot For Lot"
