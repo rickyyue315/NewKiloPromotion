@@ -189,7 +189,7 @@ def run_app():
                             "Dispatch_Type",
                             "Dispatch_Remark",
                         ]
-                    ],
+                    ]),
                     width='stretch',
                 )
 
