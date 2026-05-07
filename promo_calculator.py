@@ -232,9 +232,12 @@ def prepare_file_a(df_a_raw: pd.DataFrame, config: Config) -> Tuple[pd.DataFrame
         "Blocked",
     ]
     # For RP_Type, Supply_source: take the first non-null; in real system use stricter validation.
+    # MOQ and Safety_Stock are properties of the SKU-Site, not additive — use "first" instead of "sum".
     if df.duplicated(key_cols).any():
         warnings.append("Duplicates found in File A on (Article, Site); aggregated by sum for numerics.")
         agg_map = {col: "sum" for col in group_fields_sum}
+        agg_map["MOQ"] = "first"
+        agg_map["Safety_Stock"] = "first"
         agg_map["RP_Type"] = "first"
         agg_map["Supply_source"] = "first"
         df = (
@@ -503,17 +506,18 @@ def calculate_demand(
     # Calculate Site_Promo_Demand using the correct formula:
     # Site_Promo_Demand = SKU_Target × Site_Target_% / Promotion_Days × Target_Cover_Days
     # Note: Use Effective_Target_Cover_Days (with default value handling) instead of Promo_Target_Cover_Days
-    # Handle division by zero for Promotion_Days
+    # Handle Promotion_Days: only calculate promo demand when Promotion_Days > 0.
+    # If Promotion_Days is not provided (0), the promo demand cannot be meaningfully
+    # daily-rated, so Site_Promo_Demand stays at 0.
     promo_days = out["Promotion_Days"].copy()
-    promo_days_safe = promo_days.where(promo_days > 0, 1)  # Avoid division by zero, use 1 as default
+    valid_promo_mask = promo_mask & (promo_days > 0)
     
-    # Calculate Site_Promo_Demand only for promo SKUs
-    if promo_mask.any():
-        out.loc[promo_mask, "Site_Promo_Demand"] = (
-            out.loc[promo_mask, "SKU_Target"] *
-            out.loc[promo_mask, "Site_Target_%"] /
-            promo_days_safe.loc[promo_mask] *
-            out.loc[promo_mask, "Effective_Target_Cover_Days"]
+    if valid_promo_mask.any():
+        out.loc[valid_promo_mask, "Site_Promo_Demand"] = (
+            out.loc[valid_promo_mask, "SKU_Target"] *
+            out.loc[valid_promo_mask, "Site_Target_%"] /
+            promo_days.loc[valid_promo_mask] *
+            out.loc[valid_promo_mask, "Effective_Target_Cover_Days"]
         )
 
     # Total_Demand
@@ -594,7 +598,7 @@ def calculate_demand(
             except (TypeError, ValueError):
                 moq = 0.0
             if not pd.notna(moq) or moq <= 0:
-                return target if target > 0 else 0
+                return int(target) if target > 0 else 0
             
             # Round up to MOQ multiple
             try:
@@ -704,7 +708,7 @@ def calculate_demand(
             except (TypeError, ValueError):
                 moq = 0.0
             if not pd.notna(moq) or moq <= 0:
-                return target if target > 0 else 0
+                return int(target) if target > 0 else 0
             
             # Round up to MOQ multiple
             try:
@@ -917,13 +921,13 @@ def generate_summary(
     有效庫存 = D001 SaSa_Net_Stock + Shop(H字頭) SaSa_Net_Stock + Shop(H字頭) Pending_Received
     
     Supply source (參考Site Code H字頭) 為2時:
-    - Total_Demand>有效庫存 及 D001 SaSa_Net_Stock > 100件 = 庫存足夠, RP team會安排Lot For Lot
-    - Total_Demand>有效庫存 但 D001 SaSa_Net_Stock < 100件 = 庫存足夠目標數量, 但D001少於100件, 在需要時進行搓貨
-    - Total_Demand<有效庫存 = 庫存不足夠, 請Buyer留意
-    
+    - 有效庫存 ≥ Total_Demand 且 D001 SaSa_Net_Stock > 100件 = 庫存足夠, RP team會安排Lot For Lot
+    - 有效庫存 ≥ Total_Demand 但 D001 SaSa_Net_Stock ≤ 100件 = 庫存足夠目標數量, 但D001少於100件, 在需要時進行搓貨
+    - 有效庫存 < Total_Demand = 庫存不足夠, 請Buyer留意
+
     Supply source (參考Site Code H字頭) 為1或4時:
-    - Total_Demand>有效庫存 = 庫存足夠
-    - Total_Demand<有效庫存 = 庫存不足夠, 請Buyer開PO
+    - H-site庫存 ≥ SKU_Target = 庫存足夠
+    - H-site庫存 < SKU_Target = 庫存現時不足, 因為是行貨, 需要Buyer open PO
     
     Original features:
     - For non-D001 sites: aggregate Total_Demand, SaSa_Net_Stock, Pending_Received, Suggested_Dispatch_Qty.
