@@ -121,13 +121,6 @@ def run_app():
             with st.spinner("Generating summary report..."):
                 summary = generate_summary(detail, cfg)
 
-            # Rename shop-only columns for clarity in display
-            summary = summary.rename(columns={
-                "Total_Stock_Available": "Shop_Total_Stock_Available",
-                "Total_Stock": "Shop_Total_Stock",
-                "Total_Pending": "Shop_Total_Pending",
-            })
-
             # Display warnings - merge warnings shown prominently if critical
             all_warnings = warn_a + warn_b + warn_merge
             
@@ -208,8 +201,8 @@ def run_app():
                         column_order.append(field)
                 
                 # Add inventory fields
-                inventory_cols = ["Total_Demand", "Shop_Total_Stock_Available", "Shop_Total_Stock",
-                               "Shop_Total_Pending", "Total_Dispatch", "Total_Suggested_DN_Qty", "D001_SaSa_Net_Stock", "D001_Pending_Received",
+                inventory_cols = ["Total_Demand", "Total_Stock_Available", "Total_Stock",
+                               "Total_Pending", "Total_Dispatch", "Total_Suggested_DN_Qty", "D001_SaSa_Net_Stock", "D001_Pending_Received",
                                "Effective_Inventory", "Enhanced_Inventory_Status", "Inventory_Difference",
                                "Target_Qty_Difference", "Target_Qty_Shortage_Status"]
                 for col in inventory_cols:
@@ -257,9 +250,9 @@ def run_app():
                     )
 
                     # Bring in Total_Stock_Available from summary (already aggregated by Article)
-                    if "Shop_Total_Stock_Available" in summary.columns:
+                    if "Total_Stock_Available" in summary.columns:
                         sum_stock = (
-                            summary[["Article", "Shop_Total_Stock_Available"]]
+                            summary[["Article", "Total_Stock_Available"]]
                             .drop_duplicates(subset=["Article"])
                         )
                         chart_df = chart_df.merge(
@@ -268,10 +261,10 @@ def run_app():
                             how="left",
                         )
                     else:
-                        chart_df["Shop_Total_Stock_Available"] = 0
+                        chart_df["Total_Stock_Available"] = 0
 
                     st.bar_chart(
-                        _display_columns(chart_df).set_index("Article")[["Total Demand", "Shop Total Stock Available"]]
+                        _display_columns(chart_df).set_index("Article")[["Total Demand", "Total Stock Available"]]
                     )
                 else:
                     st.info("No non-D001 data available for the chart.")
