@@ -19,6 +19,13 @@ from promo_calculator import (
 )
 
 
+def _display_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy with underscores replaced by spaces in column names for display."""
+    out = df.copy()
+    out.columns = [c.replace("_", " ") for c in out.columns]
+    return out
+
+
 def run_app():
     st.set_page_config(
         page_title="Retail Promotion Demand & Dispatch Planner",
@@ -114,6 +121,13 @@ def run_app():
             with st.spinner("Generating summary report..."):
                 summary = generate_summary(detail, cfg)
 
+            # Rename shop-only columns for clarity in display
+            summary = summary.rename(columns={
+                "Total_Stock_Available": "Shop_Total_Stock_Available",
+                "Total_Stock": "Shop_Total_Stock",
+                "Total_Pending": "Shop_Total_Pending",
+            })
+
             # Display warnings - merge warnings shown prominently if critical
             all_warnings = warn_a + warn_b + warn_merge
             
@@ -149,7 +163,7 @@ def run_app():
             with tab1:
                 st.subheader("Detail Calculation")
                 st.dataframe(
-                    detail[
+                    _display_columns(detail[
                         [
                             "Group_No",
                             "Article",
@@ -194,8 +208,8 @@ def run_app():
                         column_order.append(field)
                 
                 # Add inventory fields
-                inventory_cols = ["Total_Demand", "Total_Stock_Available", "Total_Stock",
-                               "Total_Pending", "Total_Dispatch", "Total_Suggested_DN_Qty", "D001_SaSa_Net_Stock", "D001_Pending_Received",
+                inventory_cols = ["Total_Demand", "Shop_Total_Stock_Available", "Shop_Total_Stock",
+                               "Shop_Total_Pending", "Total_Dispatch", "Total_Suggested_DN_Qty", "D001_SaSa_Net_Stock", "D001_Pending_Received",
                                "Effective_Inventory", "Enhanced_Inventory_Status", "Inventory_Difference",
                                "Target_Qty_Difference", "Target_Qty_Shortage_Status"]
                 for col in inventory_cols:
@@ -205,21 +219,19 @@ def run_app():
                 # Display with reordered columns and styling for negative inventory differences
                 if "Inventory_Difference" in summary.columns:
                     # Create a styled version of the dataframe for display
-                    styled_summary = summary.copy()
-                    
                     # Apply styling to negative values (shortage)
                     def style_negative_diff(val):
                         if pd.notna(val) and val < 0:
                             return 'background-color: yellow; color: red; font-weight: bold;'
                         return ''
                     
-                    # Apply styling using pandas Styler
+                    # Rename columns for display before styling
                     styled_display = (
-                        summary[column_order]
+                        _display_columns(summary[column_order])
                         .style
-                        .map(style_negative_diff, subset=['Inventory_Difference'])
-                        .map(style_negative_diff, subset=['Target_Qty_Difference'])
-                        .format({'Inventory_Difference': '{:.0f}', 'Target_Qty_Difference': '{:.0f}'})
+                        .map(style_negative_diff, subset=['Inventory Difference'])
+                        .map(style_negative_diff, subset=['Target Qty Difference'])
+                        .format({'Inventory Difference': '{:.0f}', 'Target Qty Difference': '{:.0f}'})
                     )
                     
                     st.dataframe(
@@ -229,7 +241,7 @@ def run_app():
                 else:
                     # Fallback if Inventory_Difference column doesn't exist
                     st.dataframe(
-                        summary[column_order],
+                        _display_columns(summary[column_order]),
                         width='stretch',
                     )
 
@@ -245,9 +257,9 @@ def run_app():
                     )
 
                     # Bring in Total_Stock_Available from summary (already aggregated by Article)
-                    if "Total_Stock_Available" in summary.columns:
+                    if "Shop_Total_Stock_Available" in summary.columns:
                         sum_stock = (
-                            summary[["Article", "Total_Stock_Available"]]
+                            summary[["Article", "Shop_Total_Stock_Available"]]
                             .drop_duplicates(subset=["Article"])
                         )
                         chart_df = chart_df.merge(
@@ -256,10 +268,10 @@ def run_app():
                             how="left",
                         )
                     else:
-                        chart_df["Total_Stock_Available"] = 0
+                        chart_df["Shop_Total_Stock_Available"] = 0
 
                     st.bar_chart(
-                        chart_df.set_index("Article")[["Total_Demand", "Total_Stock_Available"]]
+                        _display_columns(chart_df).set_index("Article")[["Total Demand", "Shop Total Stock Available"]]
                     )
                 else:
                     st.info("No non-D001 data available for the chart.")
@@ -274,7 +286,7 @@ def run_app():
                         fill_value=0,
                     )
                     # Use plain table to avoid matplotlib dependency on Streamlit Cloud
-                    st.dataframe(pivot)
+                    st.dataframe(_display_columns(pivot))
                 else:
                     st.info("No non-D001 data available for heatmap.")
 

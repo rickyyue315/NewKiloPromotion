@@ -316,6 +316,15 @@ def prepare_file_b(
         }
     )
 
+    # Zero-pad Group_No for proper numeric sorting (1 → 001, 10 → 010, 100 → 100)
+    df_b1["Group_No"] = (
+        pd.to_numeric(df_b1["Group_No"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+        .astype(str)
+        .str.zfill(3)
+    )
+
     # Sheet 2 checks
     required_b2 = [
         config.COL_B2_SITE,
@@ -1304,15 +1313,25 @@ def export_to_excel(
     summary_simple_cols = [c for c in summary_keep_cols if c in summary.columns]
     summary_simple = summary[summary_simple_cols].copy()
 
-    with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
-        # Config sheets unchanged for traceability
-        df_final_order_report.to_excel(writer, sheet_name="Final Order Report", index=False)
-        df_b1.to_excel(writer, sheet_name="Promo_Sheet1", index=False)
-        df_b2.to_excel(writer, sheet_name="Promo_Sheet2", index=False)
+    # Rename shop-only columns for clarity in Summary_Report output
+    summary_simple = summary_simple.rename(columns={
+        "Total_Stock_Available": "Shop_Total_Stock_Available",
+        "Total_Stock": "Shop_Total_Stock",
+        "Total_Pending": "Shop_Total_Pending",
+    })
 
-        # Simplified views for business users
-        detail_simple.to_excel(writer, sheet_name="Detail_Calculation", index=False)
-        summary_simple.to_excel(writer, sheet_name="Summary_Report", index=False)
+    with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
+        # All sheet headers: replace underscores with spaces for readability
+        def _display_columns(df: pd.DataFrame) -> pd.DataFrame:
+            out = df.copy()
+            out.columns = [c.replace("_", " ") for c in out.columns]
+            return out
+
+        _display_columns(df_final_order_report).to_excel(writer, sheet_name="Final Order Report", index=False)
+        _display_columns(df_b1).to_excel(writer, sheet_name="Promo_Sheet1", index=False)
+        _display_columns(df_b2).to_excel(writer, sheet_name="Promo_Sheet2", index=False)
+        _display_columns(detail_simple).to_excel(writer, sheet_name="Detail_Calculation", index=False)
+        _display_columns(summary_simple).to_excel(writer, sheet_name="Summary_Report", index=False)
 
 
 def main(
