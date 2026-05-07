@@ -7,6 +7,18 @@ from typing import Optional, List, Dict, Any, Tuple
 import pandas as pd
 
 
+def mround(value: float, multiple: float) -> float:
+    """
+    Excel-compatible MROUND: round to nearest multiple.
+    Rounds 0.5 UP (away from zero), matching Excel MROUND behaviour.
+    Python's built-in round() uses banker's rounding (round half to even)
+    which can differ from Excel at exactly x.5 boundaries.
+    """
+    if multiple <= 0:
+        return 0.0
+    return math.floor(value / multiple + 0.5) * multiple
+
+
 class Config:
     """
     Central configuration for calculation behavior.
@@ -557,9 +569,8 @@ def calculate_demand(
                 if raw_value <= 0 or moq <= 0:
                     return 0
                 
-                # 使用 Mround (四捨五入到最接近的 MOQ 倍數)
-                # Python 中實現 Mround: round(raw_value / moq) * moq
-                result = round(raw_value / moq) * moq
+                # 使用 Mround (四捨五入到最接近的 MOQ 倍數，與 Excel MROUND 一致)
+                result = mround(raw_value, moq)
                 
                 # 確保結果不小於 MOQ
                 result = max(result, moq)
@@ -654,9 +665,8 @@ def calculate_demand(
         if raw_value <= 0 or moq <= 0:
             return 0
         
-        # 使用 Mround (四捨五入到最接近的 MOQ 倍數)
-        # Python 中實現 Mround: round(raw_value / moq) * moq
-        result = round(raw_value / moq) * moq
+        # 使用 Mround (四捨五入到最接近的 MOQ 倍數，與 Excel MROUND 一致)
+        result = mround(raw_value, moq)
         
         # 確保結果不小於 MOQ
         result = max(result, moq)
@@ -668,7 +678,15 @@ def calculate_demand(
     # Suggested DN Qty (with conditional 50 cap based on Promotion Days)
     def compute_suggested_dn_qty(row) -> int:
         rp = (row.get("RP_Type") or "").upper()
-        
+        site = (row.get("Site") or "").upper()
+
+        # HB87-RF special logic: Suggested_DN_Qty is always 0 when no promo target.
+        # Per spec: HB87-RF special formula only affects Suggested_Dispatch_Qty.
+        if site == "HB87" and rp == "RF":
+            site_promo_demand = row.get("Site_Promo_Demand", 0)
+            if pd.notna(site_promo_demand) and site_promo_demand <= 0:
+                return 0
+
         # For ND sites with Target, use Target-based calculation
         if rp == "ND":
             target_raw = row.get("Site_Promo_Demand", 0)
@@ -1020,12 +1038,7 @@ def generate_summary(
         
         # 根據Supply source判斷庫存狀態
         if supply_source == 2:
-            target_qty_diff = (float(row.get("Total_Stock_Available", 0))
-                               + d001_stock
-                               - float(row.get("SKU_Target", 0)))
-            if target_qty_diff < 0:
-                status = "庫存不足夠, 請Buyer留意"
-            elif effective_inventory >= total_demand:
+            if effective_inventory >= total_demand:
                 if d001_stock > 100:
                     status = "庫存足夠, RP team會安排Lot For Lot"
                 else:
